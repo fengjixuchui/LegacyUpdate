@@ -7,10 +7,11 @@
 
 #pragma comment(lib, "wininet.lib")
 
-const LPCSTR UpdateSiteHostname    = "legacyupdate.net";
-const LPWSTR UpdateSiteURLHttp     = L"http://legacyupdate.net/windowsupdate/v6/";
-const LPWSTR UpdateSiteURLHttps    = L"https://legacyupdate.net/windowsupdate/v6/";
-const LPWSTR UpdateSitePingTestURL = L"https://legacyupdate.net/v6/ClientWebService/ping.bin";
+const LPCSTR UpdateSiteHostname     = "legacyupdate.net";
+const LPWSTR UpdateSiteURLHttp      = L"http://legacyupdate.net/windowsupdate/v6/";
+const LPWSTR UpdateSiteURLHttps     = L"https://legacyupdate.net/windowsupdate/v6/";
+const LPWSTR UpdateSiteFirstRunFlag = L"?firstrun=true";
+const LPWSTR UpdateSitePingTestURL  = L"https://legacyupdate.net/v6/ClientWebService/ping.bin";
 
 static HRESULT AttemptSSLConnection() {
 	// We know it won't work prior to XP SP3, so just fail immediately on XP RTM-SP2 and any Win2k.
@@ -93,12 +94,27 @@ void CALLBACK LaunchUpdateSite(HWND hwnd, HINSTANCE hinstance, LPSTR lpszCmdLine
 		goto end;
 	}
 
+	// Get the OS Version Information and the System Information
+	// This is done to allow us to workaround behavior in Windows Server 2003 x64
+	// and Windows XP x64, where CLSCTX_ACTIVATE_32_BIT_SERVER is needed when activating
+	// the COM interface. This causes issues on 32-bit XP and 2000 though, and newer
+	// versions of Windows do not require it.
+	OSVERSIONINFOEX* versionInfo = GetVersionInfo();
+	SYSTEM_INFO systemInfo;
+	GetSystemInfo(&systemInfo);
+	
 	// Spawn an IE window via the COM interface. This ensures the page opens in IE (ShellExecute uses
 	// default browser), and avoids hardcoding a path to iexplore.exe. Also conveniently allows testing
 	// on Windows 11 (iexplore.exe redirects to Edge, but COM still works). Same strategy as used by
 	// Wupdmgr.exe and Muweb.dll,LaunchMUSite.
 	IWebBrowser2 *browser;
-	result = CoCreateInstance(CLSID_InternetExplorer, NULL, CLSCTX_LOCAL_SERVER, IID_IWebBrowser2, (void **)&browser);
+	if ((versionInfo->dwMajorVersion == 5) && (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)) {
+		// Server 2003 x64 and XP x64 specific quirk
+		result = CoCreateInstance(CLSID_InternetExplorer, NULL, CLSCTX_LOCAL_SERVER | CLSCTX_ACTIVATE_32_BIT_SERVER, IID_IWebBrowser2, (void **)&browser);
+	} else {
+		// Every other version of Windows
+		result = CoCreateInstance(CLSID_InternetExplorer, NULL, CLSCTX_LOCAL_SERVER, IID_IWebBrowser2, (void **)&browser);
+	}
 	if (!SUCCEEDED(result)) {
 		goto end;
 	}
@@ -106,6 +122,13 @@ void CALLBACK LaunchUpdateSite(HWND hwnd, HINSTANCE hinstance, LPSTR lpszCmdLine
 	// Can we connect with https? WinInet will throw an error if not.
 	result = AttemptSSLConnection();
 	LPWSTR siteURL = SUCCEEDED(result) ? UpdateSiteURLHttps : UpdateSiteURLHttp;
+
+	// Is this a first run launch? Append first run flag if so.
+	if (strcmp(lpszCmdLine, "firstrun") == 0) {
+		WCHAR newSiteURL[256];
+		StringCchPrintfW(newSiteURL, 256, L"%s%s", siteURL, UpdateSiteFirstRunFlag);
+		siteURL = newSiteURL;
+	}
 
 	VARIANT url;
 	VariantInit(&url);

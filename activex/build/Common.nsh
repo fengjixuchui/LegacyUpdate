@@ -1,23 +1,4 @@
-!define REGPATH_RUNONCE "Software\Microsoft\Windows\CurrentVersion\RunOnce"
-
-!define EWX_REBOOT      0x02
-!define EWX_FORCEIFHUNG 0x10
-
 !define IsNativeIA64 '${IsNativeMachineArchitecture} ${IMAGE_FILE_MACHINE_IA64}'
-
-; Work around WinVer.nsh deciding that XP x64 should be seen as XP 2002 (5.1), rather than 2003 (5.2)
-!macro _WinXPVerIs _a _b _t _f
-	!insertmacro _LOGICLIB_TEMP
-	GetWinVer $_LOGICLIB_TEMP Major
-	!insertmacro _= $_LOGICLIB_TEMP 5 +1 `${_f}`
-
-	!insertmacro _LOGICLIB_TEMP
-	GetWinVer $_LOGICLIB_TEMP Minor
-	!insertmacro _= $_LOGICLIB_TEMP `${_b}` `${_t}` `${_f}`
-!macroend
-
-!define IsWinXP2002 `"" WinXPVerIs 1`
-!define IsWinXP2003 `"" WinXPVerIs 2`
 
 Function GetArch
 	${If} ${IsNativeIA32}
@@ -35,7 +16,7 @@ FunctionEnd
 	!insertmacro _LOGICLIB_TEMP
 	${GetParameters} $_LOGICLIB_TEMP
 	ClearErrors
-	${GetOptions} $_LOGICLIB_TEMP `${_a}` $_LOGICLIB_TEMP
+	${GetOptions} $_LOGICLIB_TEMP `${_b}` $_LOGICLIB_TEMP
 	IfErrors `${_f}` `${_t}`
 !macroend
 
@@ -79,29 +60,27 @@ FunctionEnd
 	${EndIf}
 !macroend
 
-!macro DownloadAndInstall name url filename args
+!macro DownloadIfNeeded name url filename
 	${If} ${FileExists} "$EXEDIR\${filename}"
 		StrCpy $0 "$EXEDIR\${filename}"
 	${Else}
 		!insertmacro Download '${name}' '${url}' '${filename}'
 		StrCpy $0 "${filename}"
 	${EndIf}
+!macroend
 
+!macro DownloadAndInstall name url filename args
+	!insertmacro DownloadIfNeeded '${name}' '${url}' '${filename}'
 	!insertmacro DetailPrint "Installing ${name}..."
-	!insertmacro ExecWithErrorHandling '${name}' '$0 ${args}' 0
+	!insertmacro ExecWithErrorHandling '${name}' '"$0" ${args}' 0
 !macroend
 
 !macro DownloadAndInstallSP name url filename
-	${If} ${FileExists} "$EXEDIR\${filename}.exe"
-		StrCpy $0 "$EXEDIR\${filename}.exe"
-	${Else}
-		!insertmacro Download '${name}' '${url}' '${filename}.exe'
-		StrCpy $0 "${filename}.exe"
-	${EndIf}
+	!insertmacro DownloadIfNeeded '${name}' '${url}' '${filename}'
 
 	; SPInstall.exe /norestart seems to be broken. We let it do a delayed restart, then cancel it.
 	!insertmacro DetailPrint "Extracting ${name}..."
-	!insertmacro ExecWithErrorHandling '${name}' '$0 /X:"$PLUGINSDIR\${filename}"' 0
+	!insertmacro ExecWithErrorHandling '${name}' '"$0" /X:"$PLUGINSDIR\${filename}"' 0
 	!insertmacro DetailPrint "Installing ${name}..."
 	!insertmacro ExecWithErrorHandling '${name}' '${filename}\spinstall.exe /unattend /nodialog /warnrestart:600' 0
 
@@ -112,21 +91,16 @@ FunctionEnd
 	${EndIf}
 !macroend
 
-!macro DownloadAndInstallMSU name url
-	${If} ${FileExists} "$EXEDIR\${name}.msu"
-		StrCpy $0 "$EXEDIR\${name}.msu"
-	${Else}
-		!insertmacro Download '${name}' '${url}' '${name}.msu'
-		StrCpy $0 "${name}.msu"
-	${EndIf}
+!macro DownloadAndInstallMSU kbid name url
+	!insertmacro DownloadIfNeeded '${name} (${kbid})' '${url}' '${kbid}.msu'
 
 	; Stop AU service before running wusa so it doesn't try checking for updates online first (which
 	; may never complete before we install our patches).
-	!insertmacro DetailPrint "Installing ${name}..."
+	!insertmacro DetailPrint "Installing ${name} (${kbid})..."
 	SetDetailsPrint none
 	ExecShellWait "" "net" "stop wuauserv" SW_HIDE
 	SetDetailsPrint listonly
-	!insertmacro ExecWithErrorHandling '${name}' 'wusa.exe /quiet /norestart $0' 1
+	!insertmacro ExecWithErrorHandling '${name} (${kbid})' 'wusa.exe /quiet /norestart "$0"' 1
 !macroend
 
 !macro EnsureAdminRights

@@ -1,34 +1,38 @@
 Function DetermineWUAVersion
+	; Hardcoded special case for XP Home SP3, because the WUA 7.6.7600.256 setup SFX is seriously
+	; broken on it, potentially causing an unbootable Windows install due to it entering an infinite
+	; loop of creating folders in the root of C:.
+	${If} ${IsWinXP2002}
+	${AndIf} ${AtLeastServicePack} 3
+	${AndIf} ${IsHomeEdition}
+		StrCpy $1 "5.1.3-home"
+	${Else}
+		GetWinVer $1 Major
+		GetWinVer $2 Minor
+		GetWinVer $3 ServicePack
+		StrCpy $1 "$1.$2.$3"
+	${EndIf}
+
 	StrCpy $0 ""
 
-	GetWinVer $2 Major
-	GetWinVer $3 Minor
-	GetWinVer $4 ServicePack
-	StrCpy $5 "$2.$3.$4"
-
 	ClearErrors
-	ReadINIStr $6 $PLUGINSDIR\Patches.ini WUA $5
+	ReadINIStr $2 $PLUGINSDIR\Patches.ini WUA $1
 	${If} ${Errors}
 		Return
 	${EndIf}
 
 	${GetFileVersion} "$SYSDIR\wuapi.dll" $1
-	${VersionCompare} $1 $6 $7
-	${If} $7 == 2
-		${If} ${IsNativeIA32}
-			ReadINIStr $0 $PLUGINSDIR\Patches.ini WUA $6-x86
-		${ElseIf} ${IsNativeAMD64}
-			ReadINIStr $0 $PLUGINSDIR\Patches.ini WUA $6-x64
-		${ElseIf} ${IsNativeIA64}
-			ReadINIStr $0 $PLUGINSDIR\Patches.ini WUA $6-ia64
-		${EndIf}
+	${VersionCompare} $1 $2 $3
+	${If} $3 == 2
+		Call GetArch
+		Pop $0
+		ReadINIStr $0 $PLUGINSDIR\Patches.ini WUA $2-$0
 	${EndIf}
 FunctionEnd
 
 Function DownloadWUA
 	Call DetermineWUAVersion
 	${If} $0 != ""
-		SetOutPath $PLUGINSDIR
 		!insertmacro DownloadAndInstall "Windows Update Agent" "$0" "WindowsUpdateAgent.exe" "/quiet /norestart"
 	${EndIf}
 FunctionEnd
